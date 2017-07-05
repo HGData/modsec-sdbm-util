@@ -16,7 +16,7 @@
  * Use the follwoing command to get it compiled:
  * gcc modsec-sdbm-util.c -g `pkg-config apr-1 apr-util-1 --libs --cflags` -o modsec-sdbm-util 
  */
-
+#include <hiredis.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -92,7 +92,7 @@ ok_to_go:
 }
 
 int modsec_unpack(apr_pool_t *pool, const unsigned char *blob,
-        unsigned int blob_size, int action)
+        unsigned int blob_size, int action, redisContext *c)
 {
     unsigned int blob_offset;
     int ret;
@@ -167,22 +167,26 @@ int modsec_unpack(apr_pool_t *pool, const unsigned char *blob,
             }
         }
         if (action & PRINT)
-            printf("%30s: %s\n", name, value);
+            printf("%30s: %s\n", name, value);  
+redisReply *reply;
+reply = redisCommand(c,"PING");
+    printf("PING: %s\n", reply->str);
+freeReplyObject(reply);
 
     }
     return ret;
 }
 
 
-void print_modsec_variables(apr_pool_t *pool, const unsigned char *blob, unsigned int blob_size)
+void print_modsec_variables(apr_pool_t *pool, const unsigned char *blob, unsigned int blob_size, redisContext *c)
 {
     p(" - ModSecurity variables:\n");
-    modsec_unpack(pool, blob, blob_size, PRINT);
+    modsec_unpack(pool, blob, blob_size, PRINT,c);
 }
 
 int is_expired(apr_pool_t *pool, const unsigned char *blob, unsigned int blob_size)
 {
-    return modsec_unpack(pool, blob, blob_size, IS_EXPIRED);
+    return modsec_unpack(pool, blob, blob_size, IS_EXPIRED, NULL);
 }
 
 int remove_datum_t(apr_pool_t *pool, apr_sdbm_t *db, apr_sdbm_datum_t *key)
@@ -205,7 +209,7 @@ int remove_datum_t(apr_pool_t *pool, apr_sdbm_t *db, apr_sdbm_datum_t *key)
     return -1;
 }
 
-static int dump_database(apr_pool_t *pool, apr_sdbm_t *db, int action, char *new_db_path)
+static int dump_database(apr_pool_t *pool, apr_sdbm_t *db, int action, char *new_db_path, redisContext *c)
 {
     apr_status_t ret;
     apr_sdbm_datum_t key;
@@ -276,7 +280,7 @@ static int dump_database(apr_pool_t *pool, apr_sdbm_t *db, int action, char *new
                 if (action & PRINT_MODSEC_VARS)
                 {
                     print_modsec_variables(pool,
-                            (const unsigned char *)val.dptr, val.dsize);
+                            (const unsigned char *)val.dptr, val.dsize,c);
                 }
             }
         }
@@ -306,8 +310,7 @@ static int dump_database(apr_pool_t *pool, apr_sdbm_t *db, int action, char *new
             if (selected && action & SHRINK)
             {
                 ret = remove_datum_t(pool, db, &key);
-                if (ret != APR_SUCCESS)
-                {
+                if (ret != APR_SUCCESS)                {
                     p("Failed to delete key: \"%s\"\n", (const unsigned char *)key.dptr);
                 } else {
                     removed++;
@@ -502,7 +505,13 @@ int main (int argc, char **argv)
             goto that_is_all_folks;
         }
 
-        dump_database(pool, db, action, new_db_path);
+	redisContext *c = redisConnect("redis-a", 6379);
+if (c->err) {
+    printf("Error: %s\n", c->errstr);
+    // handle error
+}
+
+        dump_database(pool, db, action, new_db_path,c);
 
         apr_sdbm_close(db);
     }

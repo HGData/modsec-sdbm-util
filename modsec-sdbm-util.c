@@ -28,6 +28,7 @@
 #include <apr_allocator.h>
 #include <apr_sdbm.h>
 #include <time.h>
+#include <string.h>
 
 #define VERSION "v1.0"
 
@@ -91,16 +92,33 @@ ok_to_go:
     return 0;
 }
 
-int modsec_unpack(apr_pool_t *pool, const unsigned char *blob,
+int modsec_unpack(apr_pool_t *pool, apr_sdbm_datum_t key, const unsigned char *blob,
         unsigned int blob_size, int action, redisContext *c)
 {
     unsigned int blob_offset;
     int ret;
-
-
+    
+    printf("Migrate key %s ", key.dptr);  
+    
+    char* keyName;
+    keyName=key.dptr;
+    
+    char redisKey[1024];
+    memset(&redisKey[0], 0, sizeof(redisKey));
+    if (strncmp(keyName, "discovery", strlen("discovery")) == 0) {    
+       strcat(redisKey, keyName);       
+    } else if (strncmp(keyName, "himss", strlen("himss")) == 0) {    
+       strcat(redisKey, keyName);       
+    } else {       
+       strcpy(redisKey, "bearfist");       
+       strcat(redisKey, keyName);
+    }
+    printf("into redis key %s\n", redisKey);  
+    
     ret = 0;
     blob_offset = 3;
 
+    
     while (blob_offset + 1 < blob_size)
     {
         char *name;
@@ -166,27 +184,60 @@ int modsec_unpack(apr_pool_t *pool, const unsigned char *blob,
                     ret = 1;
             }
         }
-        if (action & PRINT)
-            printf("%30s: %s\n", name, value);  
-redisReply *reply;
-reply = redisCommand(c,"PING");
-    printf("PING: %s\n", reply->str);
-freeReplyObject(reply);
-
+        //key.dptr
+        if (action & PRINT){
+	    redisReply *reply;	    	      
+	    if(strncmp(name, "hour_count", strlen("hour_count")) == 0){
+	      printf("update hour count for %s%s %30s: %s\n", redisKey,"hour", name, value);  
+	      reply = redisCommand(c,"SET %s%s %s", redisKey,"hour", value);
+	      printf("SET: %s\n", reply->str);
+	      freeReplyObject(reply);
+	    } else if(strncmp(name, "day_count", strlen("day_count")) == 0){
+	      printf("update day count for %s%s %30s: %s\n", redisKey,"day", name, value);  
+	      reply = redisCommand(c,"SET %s%s %s", redisKey,"day", value);
+	      printf("SET: %s\n", reply->str);
+	      freeReplyObject(reply);
+	    } else if(strncmp(name, "month_count", strlen("month_count")) == 0){
+	      printf("update month count for %s%s %30s: %s\n", redisKey,"month", name, value);  
+	      reply = redisCommand(c,"SET %s%s %s", redisKey,"month", value);
+	      printf("SET: %s\n", reply->str);
+	      freeReplyObject(reply);
+	    } else if(strncmp(name, "alltime_count", strlen("alltime_count")) == 0){
+	      printf("update alltime count for %s%s %30s: %s\n", redisKey,"alltime", name, value);  
+	      reply = redisCommand(c,"SET %s%s %s", redisKey,"alltime", value);
+	      printf("SET: %s\n", reply->str);
+	      freeReplyObject(reply);
+	    } else if(strncmp(name, "__expire_hour_count", strlen("__expire_hour_count")) == 0){
+	      printf("update hour expire count for %s%s %30s: %s\n", redisKey,"hour", name, value);  
+	      reply = redisCommand(c,"EXPIREAT %s%s %s", redisKey,"hour", value);     
+	      printf("EXPIREAT: %s\n", reply->str);
+	      freeReplyObject(reply);
+	    } else if(strncmp(name, "__expire_day_count", strlen("__expire_day_count")) == 0){
+	      printf("update day expire count for %s%s %30s: %s\n", redisKey,"day", name, value);  
+	      reply = redisCommand(c,"EXPIREAT %s%s %s", redisKey,"day", value);      
+	      printf("EXPIREAT: %s\n", reply->str);
+	      freeReplyObject(reply);
+	    } else if(strncmp(name, "__expire_month_count", strlen("__expire_month_count")) == 0){
+	      printf("update month expire count for %s%s %30s: %s\n", redisKey,"month", name, value);  
+	      reply = redisCommand(c,"EXPIREAT %s%s %s", redisKey,"month", value);      
+	      printf("EXPIREAT: %s\n", reply->str);
+	      freeReplyObject(reply);
+	    }             
+	}
     }
     return ret;
 }
 
 
-void print_modsec_variables(apr_pool_t *pool, const unsigned char *blob, unsigned int blob_size, redisContext *c)
+void print_modsec_variables(apr_pool_t *pool,apr_sdbm_datum_t key, const unsigned char *blob, unsigned int blob_size, redisContext *c)
 {
     p(" - ModSecurity variables:\n");
-    modsec_unpack(pool, blob, blob_size, PRINT,c);
+    modsec_unpack(pool,key, blob, blob_size, PRINT,c);
 }
 
-int is_expired(apr_pool_t *pool, const unsigned char *blob, unsigned int blob_size)
+int is_expired(apr_pool_t *pool,apr_sdbm_datum_t key, const unsigned char *blob, unsigned int blob_size)
 {
-    return modsec_unpack(pool, blob, blob_size, IS_EXPIRED, NULL);
+    return modsec_unpack(pool,key, blob, blob_size, IS_EXPIRED, NULL);
 }
 
 int remove_datum_t(apr_pool_t *pool, apr_sdbm_t *db, apr_sdbm_datum_t *key)
@@ -273,13 +324,13 @@ static int dump_database(apr_pool_t *pool, apr_sdbm_t *db, int action, char *new
         if (action & PRINT)
         {
             if ((!(action & PRINT_ONLY_EXPIRED)) ||
-                    ((action & PRINT_ONLY_EXPIRED) && is_expired(pool,
+                    ((action & PRINT_ONLY_EXPIRED) && is_expired(pool,key,
                     (const unsigned char *)val.dptr, val.dsize)))
             {
                 printf("Key: \"%s\", Value len: %d\n", key.dptr, val.dsize);
                 if (action & PRINT_MODSEC_VARS)
                 {
-                    print_modsec_variables(pool,
+                    print_modsec_variables(pool,key,
                             (const unsigned char *)val.dptr, val.dsize,c);
                 }
             }
@@ -293,7 +344,7 @@ static int dump_database(apr_pool_t *pool, apr_sdbm_t *db, int action, char *new
                 selected = 1;
             }
 
-            if (is_expired(pool, (const unsigned char *)val.dptr, val.dsize))
+            if (is_expired(pool, key, (const unsigned char *)val.dptr, val.dsize))
             {
                 expired_datum++;
                 selected = 1;

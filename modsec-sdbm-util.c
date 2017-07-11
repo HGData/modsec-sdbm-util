@@ -109,6 +109,9 @@ int modsec_unpack(apr_pool_t *pool, apr_sdbm_datum_t key, const unsigned char *b
        strcat(redisKey, keyName);       
     } else if (strncmp(keyName, "himss", strlen("himss")) == 0) {    
        strcat(redisKey, keyName);       
+    } else if (strncmp(keyName, "zeniq.io", strlen("zeniq.io")) == 0) {    
+       strcpy(redisKey, "partner");       
+       strcat(redisKey, keyName);       
     } else {       
        strcpy(redisKey, "bearfist");       
        strcat(redisKey, keyName);
@@ -556,7 +559,7 @@ int main (int argc, char **argv)
             goto that_is_all_folks;
         }
 
-	redisContext *c = redisConnect("redis-a", 6379);
+	redisContext *c = redisConnect(getenv("REDIS"), 6379);
 if (c->err) {
     printf("Error: %s\n", c->errstr);
     // handle error
